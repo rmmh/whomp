@@ -45,7 +45,7 @@ int
 open_perf_counter(void)
 {
     int fd;
-    struct perf_event_attr pe = {};
+    struct perf_event_attr pe = { 0 };
     pe.size = sizeof(struct perf_event_attr);
 
     // Haswell BACLEARS.ANY:
@@ -107,9 +107,12 @@ count_perf_average(int fd, void (*func)(), int iters)
 }
 
 void
-write_jump(uint8_t *buf, int addr, int target)
+write_jump(uint8_t *buf, uint64_t addr, uint64_t target)
 {
-    int offset = target - addr - 5;
+    int64_t offset = target - addr - 5;
+    if (offset >= INT32_MAX || offset <= INT32_MIN)
+        errx(EXIT_FAILURE, "unable to encode jump (%lx - %lx = %lx)",
+                target, addr, offset);
     buf[addr] = INSN_JMP;
     buf[addr+1] = offset & 0xFF;
     buf[addr+2] = (offset >> 8) & 0xFF;
@@ -153,7 +156,7 @@ main(int argc, char **argv)
     jump_addrs[0] = last;
 
     for (int i = 1; i < N_JUMPS; i++) {
-        int target;
+        uint64_t target;
         do {
             target = xrand() % (BUF_SIZE - 5);
         } while (already_used(buf, target));
