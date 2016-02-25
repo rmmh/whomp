@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <err.h>
 #include <limits.h>
 #include <stdint.h>
@@ -163,9 +164,8 @@ void
 write_jump(uint8_t *buf, uint64_t addr, uint64_t target)
 {
     int64_t offset = target - addr - 5;
-    if (offset >= INT32_MAX || offset <= INT32_MIN)
-        errx(EXIT_FAILURE, "unable to encode jump (%lx - %lx = %lx)",
-                target, addr, offset);
+    assert(INT32_MIN <= offset && offset <= INT32_MAX);
+    assert(offset <= -10 || 0 <= offset);
     buf[addr] = INSN_JMP;
     buf[addr+1] = offset & 0xFF;
     buf[addr+2] = (offset >> 8) & 0xFF;
@@ -209,10 +209,10 @@ main(int argc, char **argv)
     jump_addrs[0] = last;
 
     for (int i = 1; i < N_JUMPS; i++) {
-        uint64_t target;
+        int target;
         do {
             target = xrand() % (BUF_SIZE - 5);
-        } while (already_used(buf, target));
+        } while (already_used(buf, target) || abs(target - last) < 5);
         write_jump(buf, last, target);
         jump_addrs[i] = target;
         last = target;
