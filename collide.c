@@ -71,29 +71,34 @@ open_perf_counter(int event)
     return fd;
 }
 
-const struct {
-    int model, event;
-} model_events[] = {
+struct cpu_model {
+    char *name;
+    int event;
+    int models[5];
+} cpu_models[] = {
 // These event numbers are from
 // Intel® 64 and IA-32 Architectures Software Developer’s Manual, Vol 3B
+// Descriptions:
 // "Number of front end re-steers due to BPU misprediction."
-// (Sandy Bridge): "Counts the number of times the front end is resteered,
+// Sandy Bridge: "Counts the number of times the front end is resteered,
 //      mainly when the BPU cannot provide a correct prediction and this is
 //      corrected by other branch handling mechanisms at the front end."
-// Nehalem: Sandy Bridge + " This can occur if the code has many branches
-//      such that they cannot be consumed by the BPU. Each BACLEAR asserted
-//      by the BAC generates approximately an 8 cycle bubble in the instruction
-//      fetch pipeline."
+// Nehalem: "... This can occur if the code has many branches such that they
+//      cannot be consumed by the BPU. Each BACLEAR asserted by the BAC
+//      generates approximately an 8 cycle bubble in the instruction fetch
+//      pipeline."
 // (NOTE: libpfm4 could supply these values as well)
-    {0x4E, 0x1E6}, {0x5E, 0x1E6},  // 6th Gen: Skylake BACLEARS.ANY
-    // 5th Gen: Broadwell appears to lack this event?
-    // More likely it's the same as Haswell, but they didn't appear to document it.
-    {0x3C, 0x1FE6}, {0x45, 0x1FE6}, {0x40, 0x1FE6}, // 4th Gen: Haswell BACLEARS.ANY
-    {0x3A, 0x1FE6}, // 3rd Gen: Ivy Bridge BACLEARS.ANY
-    {0x2A, 0x1E6}, {0x2D, 0x1E6},   // 2nd Gen: Sandy Bridge BACLEARS.ANY
-    {0x25, 0x1E6}, {0x2C, 0x1E6}, {0x2C, 0x1E6}, // Westmere BACLEAR.CLEAR
-    {0x1A, 0x1E6}, {0x1E, 0x1E6}, {0x1F, 0x1E6}, {0x2E, 0x1E6}, // Nehalem BACLEAR.CLEAR
-    {0, 0}
+// BACLEARS.ANY:
+    {"Skylake",      0x01E6, {0x4E, 0x5E}},
+    // Broadwell's BACLEAR.ANY event isn't documented (?)
+    {"Haswell",      0x1FE6, {0x3C, 0x45, 0x46, 0x3F}},
+    {"Ivy Bridge",   0x1FE6, {0x3A, 0x3E}},
+    {"Sandy Bridge", 0x01E6, {0x2A, 0x2D}},
+// BACLEAR.CLEAR:
+    {"Westmere",     0x01E6, {0x25, 0x2C, 0x2F}},
+    {"Nehalem",      0x01E6, {0x1A, 0x1E, 0x1F, 0x2E}},
+    {"Core 2",       0x00E6, {0x17, 0x1D}},  // BACLEARS
+    {}
 };
 
 int
@@ -121,12 +126,17 @@ determine_perf_event(void)
         }
     }
     fclose(cpuinfo);
-    printf("# CPU: %02X_%02XH\n", family, model);
     if (family != 6)
         errx(EXIT_FAILURE, "unknown cpu family %d (expected 6)", family);
-    for (int i = 0; model_events[i].model != 0; i++) {
-        if (model_events[i].model == model)
-            return model_events[i].event;
+    for (int i = 0; cpu_models[i].name; i++) {
+        for (int *cpu_model = cpu_models[i].models; *cpu_model; cpu_model++) {
+            if (*cpu_model == model) {
+                int event = cpu_models[i].event;
+                printf("# CPU: %s (%02X_%02XH => event %04X)\n",
+                    cpu_models[i].name, family, model, event);
+                return event;
+            }
+        }
     }
     errx(EXIT_FAILURE, "unknown CPU model %d", model);
 }
