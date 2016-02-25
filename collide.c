@@ -10,7 +10,7 @@
 #include <asm/unistd.h>
 #include <linux/perf_event.h>
 
-#define BITS_TESTED 24
+#define BITS_TESTED 31
 #define BUF_SIZE (1L<<BITS_TESTED)
 
 const int INSN_RET = 0xC3;  // 1 byte
@@ -138,7 +138,7 @@ main(int argc, char **argv)
 
     // Create a function from a series of unconditional jumps
 
-    uint8_t *buf = mmap((void*)0x100000000,
+    uint8_t *buf = mmap((void*)0x100000000LL,
                         BUF_SIZE,
                         PROT_READ | PROT_WRITE | PROT_EXEC,
                         MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
@@ -146,7 +146,7 @@ main(int argc, char **argv)
     if (buf == MAP_FAILED)
         err(EXIT_FAILURE, "unable to mmap");
 
-    const int N_JUMPS = 410;
+    const int N_JUMPS = 300;
     int last = xrand() % (BUF_SIZE - 5);
 
     int jump_addrs[N_JUMPS];
@@ -169,14 +169,28 @@ main(int argc, char **argv)
     long clears = count_perf_min(fd, func, 5000);
     printf("BACLEARS: %ld\n", clears);
 
+    int mask = 0;
+    int expected = 0;
+
     // Try to find which jumps are causing mispredicts.
+    printf("N   addr      clears\n");
     for (int i = 1; i < N_JUMPS - 1; i++) {
         write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);  // skip this jump
         long modified_clears = count_perf_min(fd, func, 500);
-        if (modified_clears < clears - 7)
-            printf("!! %03d %06x %ld\n", i, jump_addrs[i], modified_clears);
+        if (modified_clears < clears - 6) {
+            uintptr_t addr = (uintptr_t)buf + jump_addrs[i];
+            printf("%03d %8lx %ld\n", i, addr, modified_clears);
+            if (mask == 0) {
+                mask = (1L << BITS_TESTED) - 1;
+                expected = addr;
+            } else {
+                mask ^= (mask & addr) ^ expected;
+                expected &= mask;
+            }
+        }
         write_jump(buf, jump_addrs[i - 1], jump_addrs[i]);  // undo
     }
+    printf("mask: %08x\n", mask);
 
     close(fd);
 }
