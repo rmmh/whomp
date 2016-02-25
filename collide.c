@@ -1,5 +1,7 @@
 #include <assert.h>
 #include <err.h>
+#include <errno.h>
+#include <getopt.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -12,24 +14,33 @@
 #include <asm/unistd.h>
 #include <linux/perf_event.h>
 
-#define BITS_TESTED 31
-#define BUF_SIZE (1L<<BITS_TESTED)
-
 const int INSN_RET = 0xC3;  // 1 byte
 const int INSN_JMP = 0xE9;  // 5 bytes: opcode + 4B displacement
 
 //////////////////////////////////////////////
 // xorshift128+ by Sebastiano Vigna
 // from http://xorshift.di.unimi.it/xorshift128plus.c
+uint64_t s[2] = {0, 1};
+
 uint64_t
 xrand(void) {
-    static uint64_t s[2] = {0x12345678L, 0xABCDEF123L};
     uint64_t s1 = s[0];
     const uint64_t s0 = s[1];
     s[0] = s0;
     s1 ^= s1 << 23; // a
     s[1] = s1 ^ s0 ^ (s1 >> 18) ^ (s0 >> 5); // b, c
     return s[1] + s0;
+}
+
+void
+xsrand(uint64_t x) {
+    // splitmix64 generator -- http://xorshift.di.unimi.it/splitmix64.c
+    for (int i = 0; i <= 1; i++) {
+        uint64_t z = (x += UINT64_C(0x9E3779B97F4A7C15));
+        z = (z ^ (z >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)) * UINT64_C(0x94D049BB133111EB);
+        s[i] = z ^ (z >> 31);
+    }
 }
 /////////////////////////////////////
 
@@ -110,6 +121,7 @@ determine_perf_event(void)
         }
     }
     fclose(cpuinfo);
+    printf("# CPU: %02X_%02XH\n", family, model);
     if (family != 6)
         errx(EXIT_FAILURE, "unknown cpu family %d (expected 6)", family);
     for (int i = 0; model_events[i].model != 0; i++) {
@@ -175,9 +187,55 @@ already_used(uint8_t *buf, int addr)
     return 0;
 }
 
+void
+usage(char **argv)
+{
+    errx(2, "usage: %s [-b BIT_COUNT] [-s SEED] [-j NUM_JUMPS] [-r RUNS]",
+         argv[0]);
+}
+
 int
 main(int argc, char **argv)
 {
+    int opt;
+    int nbits = 31, jumps = 300, runs = 500;
+    uint64_t seed = 0;
+
+    while ((opt = getopt(argc, argv, "hs:j:b:r:")) != -1) {
+        errno = 0;
+        char *endptr = NULL;
+        switch (opt) {
+            case 's': seed = strtoll(optarg, &endptr, 10); break;
+            case 'b': nbits = strtol(optarg, &endptr, 10); break;
+            case 'j': jumps = strtol(optarg, &endptr, 10); break;
+            case 'r': runs =  strtol(optarg, &endptr, 10); break;
+            case 'h':
+            default:  usage(argv);
+        }
+        if (endptr == optarg || *endptr != '\0')
+            err(EXIT_FAILURE, "bad number '%s'", optarg);
+        if (errno)
+            err(EXIT_FAILURE, "error parsing '%s'", optarg);
+    }
+    if (optind != argc)
+        usage(argv);
+
+    const uint64_t BUF_SIZE = 1ULL << nbits;
+
+    int max_jumps = BUF_SIZE / 9;    // pessimistic lower bound
+    if (max_jumps > 1000000)
+        max_jumps = 1000000;
+
+    #define CHECK_RANGE(var, name, lo, hi) \
+        if (var < lo || var > hi) \
+            errx(EXIT_FAILURE, name " must be in range [%d, %d]", lo, hi);
+
+    CHECK_RANGE(nbits, "BITS", 8, 31);
+    CHECK_RANGE(jumps, "JUMPS", 0, max_jumps);
+    CHECK_RANGE(runs, "RUNS", 1, 1000000);
+
+    printf("# -j%d -b%d -s%ld\n", jumps, nbits, seed);
+
     int fd = open_perf_counter(determine_perf_event());
 
     // Create a function from a series of unconditional jumps
@@ -190,13 +248,13 @@ main(int argc, char **argv)
     if (buf == MAP_FAILED)
         err(EXIT_FAILURE, "unable to mmap");
 
-    const int N_JUMPS = 300;
+    xsrand(seed);
     int last = xrand() % (BUF_SIZE - 5);
 
-    int jump_addrs[N_JUMPS];
+    int jump_addrs[jumps];
     jump_addrs[0] = last;
 
-    for (int i = 1; i < N_JUMPS; i++) {
+    for (int i = 1; i < jumps; i++) {
         int target;
         do {
             target = xrand() % (BUF_SIZE - 5);
@@ -210,22 +268,27 @@ main(int argc, char **argv)
 
     void (*func)() = (void(*)())buf + jump_addrs[0];
 
-    long clears = count_perf_min(fd, func, 5000);
+    long clears = count_perf_min(fd, func, runs * 10);
     printf("BACLEARS: %ld\n", clears);
+
+    if (clears < 10) {
+        printf("Bailing: no event on every iteration\n");
+        return 0;
+    }
 
     int mask = 0;
     int expected = 0;
 
     // Try to find which jumps are causing mispredicts.
     printf("N   addr      clears\n");
-    for (int i = 1; i < N_JUMPS - 1; i++) {
+    for (int i = 1; i < jumps - 1; i++) {
         write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);  // skip this jump
-        long modified_clears = count_perf_min(fd, func, 500);
+        long modified_clears = count_perf_min(fd, func, runs);
         if (modified_clears < clears - 6) {
             uintptr_t addr = (uintptr_t)buf + jump_addrs[i];
             printf("%03d %8lx %ld\n", i, addr, modified_clears);
             if (mask == 0) {
-                mask = (1L << BITS_TESTED) - 1;
+                mask = BUF_SIZE - 1;
                 expected = addr;
             } else {
                 mask ^= (mask & addr) ^ expected;
