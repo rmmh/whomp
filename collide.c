@@ -141,21 +141,32 @@ determine_perf_event(void)
     errx(EXIT_FAILURE, "unknown CPU model %d", model);
 }
 
+inline uint64_t rdpmc(uint32_t ctr) {
+    uint64_t to;
+    __asm__ __volatile__(
+            "rdpmc\n\t"
+            "shl $0x20, %%rdx\n\t"
+            "or %%rdx, %%rax\n\t"
+            "mov %%rax, %0\n\t" : "=m"(to) : "c"(ctr) : "%rax", "%rdx");
+    return to;
+}
+
 long
 count_perf(int fd, void (*func)())
 {
-    long long count;
     ioctl(fd, PERF_EVENT_IOC_RESET, 0);
     func(); func(); // warm up?
     ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+
+    uint64_t before = rdpmc(0);
     // running the function 10x makes any consistent perf events
     // occur repeatedly, helping to separate them from background noise
     func(); func(); func(); func(); func();
     func(); func(); func(); func(); func();
+    uint64_t after = rdpmc(0);
+
     ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
-    if (read(fd, &count, sizeof(count)) != sizeof(count))
-        err(EXIT_FAILURE, "unable to read perfctr");
-    return count;
+    return after - before;
 }
 
 long
