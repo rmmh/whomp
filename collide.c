@@ -1,5 +1,6 @@
 #include <err.h>
 #include <limits.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,7 +55,7 @@ open_perf_counter(void)
     // Vol 3B -- 19-29
     // TODO: use libpfm4 to supply this value for different uarchs
     pe.type = PERF_TYPE_RAW;
-    pe.config = 0x1FE6;
+    pe.config = 0x01e6;
 
     pe.disabled = 1;
     pe.exclude_kernel = 1;
@@ -131,10 +132,22 @@ already_used(uint8_t *buf, int addr)
     return 0;
 }
 
+void
+bindToCpu(int cpu)
+{
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    if (sched_setaffinity(0, sizeof(set), &set) < 0)
+        err(EXIT_FAILURE, "Unable to set CPU affinity");
+}
+
 int
 main(int argc, char **argv)
 {
     int fd = open_perf_counter();
+
+    bindToCpu(1);
 
     // Create a function from a series of unconditional jumps
 
@@ -166,15 +179,15 @@ main(int argc, char **argv)
 
     void (*func)() = (void(*)())buf + jump_addrs[0];
 
-    long clears = count_perf_min(fd, func, 5000);
+    long clears = count_perf_min(fd, func, 50000);
     printf("BACLEARS: %ld\n", clears);
 
     // Try to find which jumps are causing mispredicts.
     for (int i = 1; i < N_JUMPS - 1; i++) {
         write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);  // skip this jump
-        long modified_clears = count_perf_min(fd, func, 500);
+        long modified_clears = count_perf_min(fd, func, 5000);
         if (modified_clears < clears - 7)
-            printf("!! %03d %06x %ld\n", i, jump_addrs[i], modified_clears);
+            printf("!! %03d %08x %ld\n", i, jump_addrs[i], modified_clears);
         write_jump(buf, jump_addrs[i - 1], jump_addrs[i]);  // undo
     }
 
