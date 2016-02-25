@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <limits.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,17 @@ xsrand(uint64_t x) {
     }
 }
 /////////////////////////////////////
+
+void
+bindToCpu(int cpu)
+{
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    if (sched_setaffinity(0, sizeof(set), &set) < 0)
+        err(EXIT_FAILURE, "Unable to set CPU affinity");
+}
+
 
 long
 perf_event_open(struct perf_event_attr *hw_event, pid_t pid,
@@ -264,7 +276,9 @@ main(int argc, char **argv)
         max_jumps = jumps;
     }
 
+    bindToCpu(1);
     int fd = open_perf_counter(determine_perf_event());
+
     // Create a function from a series of unconditional jumps
 
     uint8_t *buf = mmap((void*)0x100000000LL,
