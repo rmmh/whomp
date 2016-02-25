@@ -148,18 +148,6 @@ count_perf_min(int fd, void (*func)(), int iters)
     return min_count;
 }
 
-double
-count_perf_average(int fd, void (*func)(), int iters)
-{
-    for (int i = 0; i < 10; i++)
-        count_perf(fd, func);  // warm-up.
-
-    long total = 0;
-    for (int i = 0; i < iters; i++)
-        total += count_perf(fd, func);
-    return total / (double)iters;
-}
-
 void
 write_jump(uint8_t *buf, uint64_t addr, uint64_t target)
 {
