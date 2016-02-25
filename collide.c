@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <sys/ioctl.h>
@@ -42,20 +43,13 @@ perf_event_open(struct perf_event_attr *hw_event, pid_t pid,
 }
 
 int
-open_perf_counter(void)
+open_perf_counter(int event)
 {
     int fd;
     struct perf_event_attr pe = {};
     pe.size = sizeof(struct perf_event_attr);
-
-    // Haswell BACLEARS.ANY:
-    // "Number of front end re-steers due to BPU misprediction."
-    // Intel® 64 and IA-32 Architectures Software Developer’s Manual
-    // Vol 3B -- 19-29
-    // TODO: use libpfm4 to supply this value for different uarchs
     pe.type = PERF_TYPE_RAW;
-    pe.config = 0x1FE6;
-
+    pe.config = event;
     pe.disabled = 1;
     pe.exclude_kernel = 1;
     pe.exclude_hv = 1;
@@ -63,6 +57,65 @@ open_perf_counter(void)
     if (fd == -1)
         err(EXIT_FAILURE, "Error opening leader %llx", pe.config);
     return fd;
+}
+
+const struct {
+    int model, event;
+} model_events[] = {
+// These event numbers are from
+// Intel® 64 and IA-32 Architectures Software Developer’s Manual, Vol 3B
+// "Number of front end re-steers due to BPU misprediction."
+// (Sandy Bridge): "Counts the number of times the front end is resteered,
+//      mainly when the BPU cannot provide a correct prediction and this is
+//      corrected by other branch handling mechanisms at the front end."
+// Nehalem: Sandy Bridge + " This can occur if the code has many branches
+//      such that they cannot be consumed by the BPU. Each BACLEAR asserted
+//      by the BAC generates approximately an 8 cycle bubble in the instruction
+//      fetch pipeline."
+// (NOTE: libpfm4 could supply these values as well)
+    {0x4E, 0x1E6}, {0x5E, 0x1E6},  // 6th Gen: Skylake BACLEARS.ANY
+    // 5th Gen: Broadwell appears to lack this event?
+    // More likely it's the same as Haswell, but they didn't appear to document it.
+    {0x3C, 0x1FE6}, {0x45, 0x1FE6}, {0x40, 0x1FE6}, // 4th Gen: Haswell BACLEARS.ANY
+    {0x3A, 0x1FE6}, // 3rd Gen: Ivy Bridge BACLEARS.ANY
+    {0x2A, 0x1E6}, {0x2D, 0x1E6},   // 2nd Gen: Sandy Bridge BACLEARS.ANY
+    {0x25, 0x1E6}, {0x2C, 0x1E6}, {0x2C, 0x1E6}, // Westmere BACLEAR.CLEAR
+    {0x1A, 0x1E6}, {0x1E, 0x1E6}, {0x1F, 0x1E6}, {0x2E, 0x1E6}, // Nehalem BACLEAR.CLEAR
+    {0, 0}
+};
+
+int
+determine_perf_event(void)
+{
+    FILE *cpuinfo = fopen("/proc/cpuinfo", "r");
+    if (!cpuinfo)
+        err(EXIT_FAILURE, "unable to open cpuinfo");
+    int family = 0, model = 0;
+    char *line = NULL;
+    size_t size = 0;
+    while (getline(&line, &size, cpuinfo) != -1) {
+        char *saveptr = NULL;
+        char *key = strtok_r(line, "\t:", &saveptr);
+        char *value = strtok_r(NULL, "\t: ", &saveptr);
+        if (key == NULL || value == NULL)
+            break;
+        if (!strcmp("vendor_id", key)) {
+            if (!strcmp(key, "GenuineIntel\n"))
+                errx(EXIT_FAILURE, "only works for Intel");
+        } else if (!strcmp("cpu family", key)) {
+            family = atoi(value);
+        } else if (!strcmp("model", key)) {
+            model = atoi(value);
+        }
+    }
+    fclose(cpuinfo);
+    if (family != 6)
+        errx(EXIT_FAILURE, "unknown cpu family %d (expected 6)", family);
+    for (int i = 0; model_events[i].model != 0; i++) {
+        if (model_events[i].model == model)
+            return model_events[i].event;
+    }
+    errx(EXIT_FAILURE, "unknown CPU model %d", model);
 }
 
 long
@@ -134,7 +187,7 @@ already_used(uint8_t *buf, int addr)
 int
 main(int argc, char **argv)
 {
-    int fd = open_perf_counter();
+    int fd = open_perf_counter(determine_perf_event());
 
     // Create a function from a series of unconditional jumps
 
