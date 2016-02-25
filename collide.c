@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <limits.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -209,6 +210,16 @@ already_used(uint8_t *buf, int addr)
 }
 
 void
+bindToCpu(int cpu)
+{
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(cpu, &set);
+    if (sched_setaffinity(0, sizeof(set), &set) < 0)
+        err(EXIT_FAILURE, "Unable to set CPU affinity");
+}
+
+void
 usage(char **argv)
 {
     errx(2, "usage: %s [-b BIT_COUNT] [-s SEED] [-j NUM_JUMPS] [-r RUNS]",
@@ -258,6 +269,8 @@ main(int argc, char **argv)
     printf("# -j%d -b%d -s%ld\n", jumps, nbits, seed);
 
     int fd = open_perf_counter(determine_perf_event());
+
+    bindToCpu(1);
 
     // Create a function from a series of unconditional jumps
 
