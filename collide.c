@@ -164,11 +164,11 @@ inline uint64_t rdpmc(uint32_t ctr) {
 }
 
 long
-count_perf(int fd, void (*func)())
+count_perf(void (*func)())
 {
-    ioctl(fd, PERF_EVENT_IOC_RESET, 0);
-    func(); func(); // warm up?
-    ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+    // warm up
+    func(); func(); func(); func(); func();
+    func(); func(); func(); func(); func();
 
     uint64_t before = rdpmc(0);
     // running the function 10x makes any consistent perf events
@@ -177,18 +177,17 @@ count_perf(int fd, void (*func)())
     func(); func(); func(); func(); func();
     uint64_t after = rdpmc(0);
 
-    ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
     return after - before;
 }
 
-// Return the minimum of repeated runs of count_perf(fd, func),
+// Return the minimum of repeated runs of count_perf(func),
 // or the first result at or below thresh.
 long
-count_perf_min_below(int fd, void (*func)(), int iters, int thresh)
+count_perf_min_below(void (*func)(), int iters, int thresh)
 {
     long min_count = LONG_MAX;
     for (int i = 0; i < iters; i++) {
-        long count = count_perf(fd, func);
+        long count = count_perf(func);
         if (count < min_count)
             min_count = count;
         if (count <= thresh)
@@ -197,11 +196,11 @@ count_perf_min_below(int fd, void (*func)(), int iters, int thresh)
     return min_count;
 }
 
-// Return the minimum of repeated runs of count_perf(fd, func)
+// Return the minimum of repeated runs of count_perf(func)
 long
-count_perf_min(int fd, void (*func)(), int iters)
+count_perf_min(void (*func)(), int iters)
 {
-    return count_perf_min_below(fd, func, iters, 0);
+    return count_perf_min_below(func, iters, 0);
 }
 
 void
@@ -289,6 +288,8 @@ main(int argc, char **argv)
 
     bindToCpu(1);
     int fd = open_perf_counter(determine_perf_event());
+    ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+    ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
 
     // Create a function from a series of unconditional jumps
 
@@ -317,7 +318,7 @@ main(int argc, char **argv)
         buf[target] = INSN_RET;
         jump_addrs[i] = target;
         last = target;
-        if (jumps == 0 && count_perf_min_below(fd, func, runs, 12) > 12) {
+        if (jumps == 0 && count_perf_min_below(func, runs, 12) > 12) {
             jumps = i;
             break;
         }
@@ -328,7 +329,7 @@ main(int argc, char **argv)
         printf(" -m%04x", clear_mask);
     printf("\n");
 
-    long clears = count_perf_min(fd, func, runs * 10);
+    long clears = count_perf_min(func, runs * 10);
     printf("BACLEARS: %ld\n", clears);
 
     if (clears < 10) {
@@ -350,7 +351,7 @@ main(int argc, char **argv)
         } else {
             write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);
         }
-        long modified_clears = count_perf_min(fd, func, runs);
+        long modified_clears = count_perf_min(func, runs);
         if (modified_clears < clears - 6) {
             uintptr_t addr = (uintptr_t)buf + jump_addrs[i];
             printf("%03d %8lx %ld\n", i + 1, addr, modified_clears);
