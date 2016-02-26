@@ -296,8 +296,15 @@ main(int argc, char **argv)
 
     // Try to find which jumps are causing mispredicts.
     printf("N   addr      clears\n");
-    for (int i = 1; i < jumps - 1; i++) {
-        write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);  // skip this jump
+    for (int i = 0; i < jumps; i++) {
+        // skip this jump
+        if (i == 0 && jumps > 1) {
+            func += jump_addrs[1] - jump_addrs[0];
+        } else if (i == jumps - 1) {
+            buf[jump_addrs[i - 1]] = INSN_RET;
+        } else {
+            write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);
+        }
         long modified_clears = count_perf_min(fd, func, runs);
         if (modified_clears < clears - 6) {
             uintptr_t addr = (uintptr_t)buf + jump_addrs[i];
@@ -310,7 +317,12 @@ main(int argc, char **argv)
                 expected &= mask;
             }
         }
-        write_jump(buf, jump_addrs[i - 1], jump_addrs[i]);  // undo
+        // undo
+        if (i == 0 && jumps > 1) {
+            func -= jump_addrs[1] - jump_addrs[0];
+        } else {
+            write_jump(buf, jump_addrs[i - 1], jump_addrs[i]);
+        }
     }
     printf("mask: %08x\n", mask);
 
