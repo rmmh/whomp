@@ -249,7 +249,10 @@ main(int argc, char **argv)
     CHECK_RANGE(jumps, "JUMPS", 0, max_jumps);
     CHECK_RANGE(runs, "RUNS", 1, 1000000);
 
-    printf("# -j%d -b%d -s%ld\n", jumps, nbits, seed);
+    printf("# -j%d -b%d -s%ld", jumps, nbits, seed);
+    if (clear_mask)
+        printf(" -m%04x", clear_mask);
+    printf("\n");
 
     int fd = open_perf_counter(determine_perf_event());
 
