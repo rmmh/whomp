@@ -158,16 +158,27 @@ count_perf(int fd, void (*func)())
     return count;
 }
 
+// Return the minimum of repeated runs of count_perf(fd, func),
+// or the first result at or below thresh.
 long
-count_perf_min(int fd, void (*func)(), int iters)
+count_perf_min_below(int fd, void (*func)(), int iters, int thresh)
 {
     long min_count = LONG_MAX;
     for (int i = 0; i < iters; i++) {
         long count = count_perf(fd, func);
         if (count < min_count)
             min_count = count;
+        if (count <= thresh)
+            return count;   // early exit
     }
     return min_count;
+}
+
+// Return the minimum of repeated runs of count_perf(fd, func)
+long
+count_perf_min(int fd, void (*func)(), int iters)
+{
+    return count_perf_min_below(fd, func, iters, 0);
 }
 
 void
@@ -281,7 +292,7 @@ main(int argc, char **argv)
         buf[target] = INSN_RET;
         jump_addrs[i] = target;
         last = target;
-        if (jumps == 0 && count_perf_min(fd, func, runs) > 10) {
+        if (jumps == 0 && count_perf_min_below(fd, func, runs, 12) > 12) {
             jumps = i;
             break;
         }
