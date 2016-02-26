@@ -153,11 +153,11 @@ inline uint64_t rdpmc(uint32_t ctr) {
 }
 
 long
-count_perf(int fd, void (*func)())
+count_perf(void (*func)())
 {
-    ioctl(fd, PERF_EVENT_IOC_RESET, 0);
-    func(); func(); // warm up?
-    ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
+    // warm up
+    func(); func(); func(); func(); func();
+    func(); func(); func(); func(); func();
 
     uint64_t before = rdpmc(0);
     // running the function 10x makes any consistent perf events
@@ -166,16 +166,15 @@ count_perf(int fd, void (*func)())
     func(); func(); func(); func(); func();
     uint64_t after = rdpmc(0);
 
-    ioctl(fd, PERF_EVENT_IOC_DISABLE, 0);
     return after - before;
 }
 
 long
-count_perf_min(int fd, void (*func)(), int iters)
+count_perf_min(void (*func)(), int iters)
 {
     long min_count = LONG_MAX;
     for (int i = 0; i < iters; i++) {
-        long count = count_perf(fd, func);
+        long count = count_perf(func);
         if (count < min_count)
             min_count = count;
     }
@@ -268,9 +267,10 @@ main(int argc, char **argv)
 
     printf("# -j%d -b%d -s%ld\n", jumps, nbits, seed);
 
-    int fd = open_perf_counter(determine_perf_event());
-
     bindToCpu(1);
+    int fd = open_perf_counter(determine_perf_event());
+    ioctl(fd, PERF_EVENT_IOC_RESET, 0);
+    ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
 
     // Create a function from a series of unconditional jumps
 
@@ -302,7 +302,7 @@ main(int argc, char **argv)
 
     void (*func)() = (void(*)())buf + jump_addrs[0];
 
-    long clears = count_perf_min(fd, func, runs * 10);
+    long clears = count_perf_min(func, runs * 10);
     printf("BACLEARS: %ld\n", clears);
 
     if (clears < 10) {
@@ -317,7 +317,7 @@ main(int argc, char **argv)
     printf("N   addr      clears\n");
     for (int i = 1; i < jumps - 1; i++) {
         write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);  // skip this jump
-        long modified_clears = count_perf_min(fd, func, runs);
+        long modified_clears = count_perf_min(func, runs);
         if (modified_clears < clears - 6) {
             uintptr_t addr = (uintptr_t)buf + jump_addrs[i];
             printf("%03d %8lx %ld\n", i, addr, modified_clears);
