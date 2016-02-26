@@ -208,7 +208,7 @@ int
 main(int argc, char **argv)
 {
     int opt;
-    int nbits = 31, jumps = 300, runs = 500;
+    int nbits = 31, jumps = 0, runs = 500;
     uint64_t seed = 0;
 
     // specify a set of bits that will be zero in each jump
@@ -238,8 +238,8 @@ main(int argc, char **argv)
 
     // pessimistic lower bound
     int max_jumps = (1ULL << (nbits - __builtin_popcount(clear_mask))) / 9;
-    if (max_jumps > 1000000)
-        max_jumps = 1000000;
+    if (max_jumps > 100000)
+        max_jumps = 100000;
 
     #define CHECK_RANGE(var, name, lo, hi) \
         if (var < lo || var > hi) \
@@ -249,13 +249,11 @@ main(int argc, char **argv)
     CHECK_RANGE(jumps, "JUMPS", 0, max_jumps);
     CHECK_RANGE(runs, "RUNS", 1, 1000000);
 
-    printf("# -j%d -b%d -s%ld", jumps, nbits, seed);
-    if (clear_mask)
-        printf(" -m%04x", clear_mask);
-    printf("\n");
+    if (jumps != 0) {
+        max_jumps = jumps;
+    }
 
     int fd = open_perf_counter(determine_perf_event());
-
     // Create a function from a series of unconditional jumps
 
     uint8_t *buf = mmap((void*)0x100000000LL,
@@ -269,22 +267,30 @@ main(int argc, char **argv)
     xsrand(seed);
     int last = xrand() % (BUF_SIZE - 5);
 
-    int jump_addrs[jumps];
+    int jump_addrs[max_jumps];
     jump_addrs[0] = last;
+    buf[last] = INSN_RET;
+    void (*func)() = (void(*)())buf + jump_addrs[0];
 
-    for (int i = 1; i < jumps; i++) {
+    for (int i = 1; i < max_jumps; i++) {
         int target;
         do {
             target = (xrand() % (BUF_SIZE - 5)) & ~clear_mask;
         } while (already_used(buf, target) || abs(target - last) < 5);
         write_jump(buf, last, target);
+        buf[target] = INSN_RET;
         jump_addrs[i] = target;
         last = target;
+        if (jumps == 0 && count_perf_min(fd, func, runs) > 10) {
+            jumps = i;
+            break;
+        }
     }
 
-    buf[last] = INSN_RET;
-
-    void (*func)() = (void(*)())buf + jump_addrs[0];
+    printf("# -j%d -b%d -s%ld", jumps, nbits, seed);
+    if (clear_mask)
+        printf(" -m%04x", clear_mask);
+    printf("\n");
 
     long clears = count_perf_min(fd, func, runs * 10);
     printf("BACLEARS: %ld\n", clears);
@@ -311,7 +317,7 @@ main(int argc, char **argv)
         long modified_clears = count_perf_min(fd, func, runs);
         if (modified_clears < clears - 6) {
             uintptr_t addr = (uintptr_t)buf + jump_addrs[i];
-            printf("%03d %8lx %ld\n", i, addr, modified_clears);
+            printf("%03d %8lx %ld\n", i + 1, addr, modified_clears);
             if (mask == 0) {
                 mask = BUF_SIZE - 1;
                 expected = addr;
