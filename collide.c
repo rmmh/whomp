@@ -90,7 +90,7 @@ struct cpu_model {
 // (NOTE: libpfm4 could supply these values as well)
 // BACLEARS.ANY:
     {"Skylake",      0x01E6, {0x4E, 0x5E}},
-    // Broadwell's BACLEAR.ANY event isn't documented (?)
+    {"Broadwell",    0x1FE6, {0x3D, 0x47, 0x56}}, // Undocumented event
     {"Haswell",      0x1FE6, {0x3C, 0x45, 0x46, 0x3F}},
     {"Ivy Bridge",   0x1FE6, {0x3A, 0x3E}},
     {"Sandy Bridge", 0x01E6, {0x2A, 0x2D}},
