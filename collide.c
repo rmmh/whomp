@@ -200,7 +200,7 @@ already_used(uint8_t *buf, int addr)
 void
 usage(char **argv)
 {
-    errx(2, "usage: %s [-b BIT_COUNT] [-s SEED] [-j NUM_JUMPS] [-r RUNS]",
+    errx(2, "usage: %s [-b BITS] [-s SEED] [-j JUMPS] [-r RUNS] [-m MASK_HEX]",
          argv[0]);
 }
 
@@ -211,14 +211,18 @@ main(int argc, char **argv)
     int nbits = 31, jumps = 300, runs = 500;
     uint64_t seed = 0;
 
-    while ((opt = getopt(argc, argv, "hs:j:b:r:")) != -1) {
+    // specify a set of bits that will be zero in each jump
+    uint32_t clear_mask = 0;
+
+    while ((opt = getopt(argc, argv, "hs:j:b:r:m:")) != -1) {
         errno = 0;
         char *endptr = NULL;
         switch (opt) {
             case 's': seed = strtoll(optarg, &endptr, 10); break;
             case 'b': nbits = strtol(optarg, &endptr, 10); break;
             case 'j': jumps = strtol(optarg, &endptr, 10); break;
-            case 'r': runs =  strtol(optarg, &endptr, 10); break;
+            case 'r': runs = strtol(optarg, &endptr, 10); break;
+            case 'm': clear_mask = strtol(optarg, &endptr, 16); break;
             case 'h':
             default:  usage(argv);
         }
@@ -232,7 +236,8 @@ main(int argc, char **argv)
 
     const uint64_t BUF_SIZE = 1ULL << nbits;
 
-    int max_jumps = BUF_SIZE / 9;    // pessimistic lower bound
+    // pessimistic lower bound
+    int max_jumps = (1ULL << (nbits - __builtin_popcount(clear_mask))) / 9;
     if (max_jumps > 1000000)
         max_jumps = 1000000;
 
@@ -267,7 +272,7 @@ main(int argc, char **argv)
     for (int i = 1; i < jumps; i++) {
         int target;
         do {
-            target = xrand() % (BUF_SIZE - 5);
+            target = (xrand() % (BUF_SIZE - 5)) & ~clear_mask;
         } while (already_used(buf, target) || abs(target - last) < 5);
         write_jump(buf, last, target);
         jump_addrs[i] = target;
