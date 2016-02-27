@@ -46,7 +46,7 @@ xsrand(uint64_t x) {
 /////////////////////////////////////
 
 void
-bindToCpu(int cpu)
+bind_to_cpu(int cpu)
 {
     cpu_set_t set;
     CPU_ZERO(&set);
@@ -229,7 +229,8 @@ already_used(uint8_t *buf, int addr)
 void
 usage(char **argv)
 {
-    errx(2, "usage: %s [-b BITS] [-s SEED] [-j JUMPS] [-r RUNS] [-m MASK_HEX]",
+    errx(2, "usage: %s [-b BITS] [-s SEED] [-j JUMPS] [-r RUNS] [-m MASK_HEX]"
+            " [-c CPU]",
          argv[0]);
 }
 
@@ -237,18 +238,19 @@ int
 main(int argc, char **argv)
 {
     int opt;
-    int nbits = 31, jumps = 0, runs = 500;
+    int cpu = 0, nbits = 31, jumps = 0, runs = 500;
     uint64_t seed = 0;
 
     // specify a set of bits that will be zero in each jump
     uint32_t clear_mask = 0;
 
-    while ((opt = getopt(argc, argv, "hs:j:b:r:m:")) != -1) {
+    while ((opt = getopt(argc, argv, "hs:j:b:r:m:c:")) != -1) {
         errno = 0;
         char *endptr = NULL;
         switch (opt) {
             case 's': seed = strtoll(optarg, &endptr, 10); break;
             case 'b': nbits = strtol(optarg, &endptr, 10); break;
+            case 'c': runs = strtol(optarg, &endptr, 10); break;
             case 'j': jumps = strtol(optarg, &endptr, 10); break;
             case 'r': runs = strtol(optarg, &endptr, 10); break;
             case 'm': clear_mask = strtol(optarg, &endptr, 16); break;
@@ -262,6 +264,7 @@ main(int argc, char **argv)
     }
     if (optind != argc)
         usage(argv);
+
 
     const uint64_t BUF_SIZE = 1ULL << nbits;
 
@@ -282,7 +285,7 @@ main(int argc, char **argv)
         max_jumps = jumps;
     }
 
-    bindToCpu(1);
+    bind_to_cpu(cpu);
     int fd = open_perf_counter(determine_perf_event());
     ioctl(fd, PERF_EVENT_IOC_RESET, 0);
     ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
