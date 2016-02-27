@@ -276,7 +276,7 @@ main(int argc, char **argv)
         err(EXIT_FAILURE, "unable to mmap");
 
     xsrand(seed);
-    int last = xrand() % (BUF_SIZE - 5);
+    int last = xrand() % (BUF_SIZE - 5) & ~clear_mask;
 
     int jump_addrs[max_jumps];
     jump_addrs[0] = last;
