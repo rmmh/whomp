@@ -75,8 +75,6 @@ open_perf_counter(int event)
     pe.type = PERF_TYPE_RAW;
     pe.config = event;
     pe.disabled = 1;
-    pe.exclude_kernel = 1;
-    pe.exclude_hv = 1;
     fd = perf_event_open(&pe, 0, -1, -1, 0);
     if (fd == -1)
         err(EXIT_FAILURE, "Error opening leader %llx", pe.config);
@@ -153,14 +151,12 @@ determine_perf_event(void)
     errx(EXIT_FAILURE, "unknown CPU model %d", model);
 }
 
-inline uint64_t rdpmc(uint32_t ctr) {
-    uint64_t to;
-    __asm__ __volatile__(
-            "rdpmc\n\t"
-            "shl $0x20, %%rdx\n\t"
-            "or %%rdx, %%rax\n\t"
-            "mov %%rax, %0\n\t" : "=m"(to) : "c"(ctr) : "%rax", "%rdx");
-    return to;
+uint64_t
+rdpmc(uint32_t ctr)
+{
+    uint32_t low, high;
+    __asm__ volatile("rdpmc" : "=a" (low), "=d" (high) : "c" (ctr));
+    return (uint64_t)low | (((uint64_t)high) << 32);
 }
 
 long
@@ -291,6 +287,9 @@ main(int argc, char **argv)
     ioctl(fd, PERF_EVENT_IOC_RESET, 0);
     ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
 
+    // This is necessary to enable rdpmc on Ubuntu 15.10.
+    void *event_buf = mmap(NULL, getpagesize(), PROT_NONE, MAP_SHARED, fd, 0);
+
     // Create a function from a series of unconditional jumps
 
     uint8_t *buf = mmap((void*)0x100000000LL,
@@ -372,5 +371,6 @@ main(int argc, char **argv)
     }
     printf("mask: %08x\n", mask);
 
+    munmap(event_buf, getpagesize());
     close(fd);
 }
