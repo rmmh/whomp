@@ -160,18 +160,18 @@ rdpmc(uint32_t ctr)
 }
 
 long
-count_perf(void (*func)())
+count_perf(void (*func)(), int counter)
 {
     // warm up
     func(); func(); func(); func(); func();
     func(); func(); func(); func(); func();
 
-    uint64_t before = rdpmc(0);
+    uint64_t before = rdpmc(counter);
     // running the function 10x makes any consistent perf events
     // occur repeatedly, helping to separate them from background noise
     func(); func(); func(); func(); func();
     func(); func(); func(); func(); func();
-    uint64_t after = rdpmc(0);
+    uint64_t after = rdpmc(counter);
 
     return after - before;
 }
@@ -179,11 +179,11 @@ count_perf(void (*func)())
 // Return the minimum of repeated runs of count_perf(func),
 // or the first result at or below thresh.
 long
-count_perf_min_below(void (*func)(), int iters, int thresh)
+count_perf_min_below(void (*func)(), int iters, int thresh, int counter)
 {
     long min_count = LONG_MAX;
     for (int i = 0; i < iters; i++) {
-        long count = count_perf(func);
+        long count = count_perf(func, counter);
         if (count < min_count)
             min_count = count;
         if (count <= thresh)
@@ -194,9 +194,9 @@ count_perf_min_below(void (*func)(), int iters, int thresh)
 
 // Return the minimum of repeated runs of count_perf(func)
 long
-count_perf_min(void (*func)(), int iters)
+count_perf_min(void (*func)(), int iters, int counter)
 {
-    return count_perf_min_below(func, iters, 0);
+    return count_perf_min_below(func, iters, 0, counter);
 }
 
 void
@@ -290,8 +290,11 @@ main(int argc, char **argv)
     ioctl(fd, PERF_EVENT_IOC_RESET, 0);
     ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
 
-    // This is necessary to enable rdpmc on Ubuntu 15.10.
-    void *event_buf = mmap(NULL, getpagesize(), PROT_NONE, MAP_SHARED, fd, 0);
+    struct perf_event_mmap_page *event_buf = (struct perf_event_mmap_page*)mmap(
+            NULL, getpagesize(), PROT_READ, MAP_SHARED, fd, 0);
+    if (event_buf == MAP_FAILED)
+        err(EXIT_FAILURE, "unable to mmap event_buf");
+    int counter = event_buf->index - 1;
 
     // Create a function from a series of unconditional jumps
 
@@ -320,7 +323,7 @@ main(int argc, char **argv)
         buf[target] = INSN_RET;
         jump_addrs[i] = target;
         last = target;
-        if (jumps == 0 && count_perf_min_below(func, runs, 12) > 12) {
+        if (jumps == 0 && count_perf_min_below(func, runs, 12, counter) > 12) {
             jumps = i;
             break;
         }
@@ -331,7 +334,7 @@ main(int argc, char **argv)
         printf(" -m%04x", clear_mask);
     printf("\n");
 
-    long clears = count_perf_min(func, runs * 10);
+    long clears = count_perf_min(func, runs * 10, counter);
     printf("BACLEARS: %ld\n", clears);
 
     if (clears < 10) {
@@ -353,7 +356,7 @@ main(int argc, char **argv)
         } else {
             write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);
         }
-        long modified_clears = count_perf_min(func, runs);
+        long modified_clears = count_perf_min(func, runs, counter);
         if (modified_clears < clears - 6) {
             uintptr_t addr = (uintptr_t)buf + jump_addrs[i];
             printf("%03d %8lx %ld\n", i + 1, addr, modified_clears);
