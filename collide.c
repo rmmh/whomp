@@ -151,12 +151,17 @@ determine_perf_event(void)
     errx(EXIT_FAILURE, "unknown CPU model %d", model);
 }
 
-uint64_t
+inline uint64_t
 rdpmc(uint32_t ctr)
 {
     uint32_t low, high;
     __asm__ volatile("rdpmc" : "=a" (low), "=d" (high) : "c" (ctr));
     return (uint64_t)low | (((uint64_t)high) << 32);
+}
+
+inline void
+serialize(void) {
+    __asm__ __volatile__("xor %%eax, %%eax\n\tcpuid" : : : "rax", "rbx", "rcx", "rdx");
 }
 
 long
@@ -166,12 +171,16 @@ count_perf(void (*func)(), int counter)
     func(); func(); func(); func(); func();
     func(); func(); func(); func(); func();
 
+    serialize(); // prevent instructions prior to here from crossing the rdpmc
     uint64_t before = rdpmc(counter);
+    serialize(); // prevent instructions after the rdpmc from jumping ahead
     // running the function 10x makes any consistent perf events
     // occur repeatedly, helping to separate them from background noise
     func(); func(); func(); func(); func();
     func(); func(); func(); func(); func();
+    serialize(); // ensure all the func() work is done
     uint64_t after = rdpmc(counter);
+    serialize(); // prevent any instructions jumping ahead of the rdpmc
 
     return after - before;
 }
