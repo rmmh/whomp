@@ -164,8 +164,10 @@ serialize(void) {
     __asm__ __volatile__("xor %%eax, %%eax\n\tcpuid" : : : "rax", "rbx", "rcx", "rdx");
 }
 
+typedef void (*voidfunc)(void);
+
 long
-count_perf(void (*func)(void), int counter)
+count_perf(voidfunc func, int counter)
 {
     // warm up
     func(); func(); func(); func(); func();
@@ -185,7 +187,7 @@ count_perf(void (*func)(void), int counter)
 // Return the minimum of repeated runs of count_perf(func),
 // or the first result at or below thresh.
 long
-count_perf_min_below(void (*func)(), int iters, int thresh, int counter)
+count_perf_min_below(voidfunc func, int iters, int thresh, int counter)
 {
     long min_count = LONG_MAX;
     for (int i = 0; i < iters; i++) {
@@ -200,7 +202,7 @@ count_perf_min_below(void (*func)(), int iters, int thresh, int counter)
 
 // Return the minimum of repeated runs of count_perf(func)
 long
-count_perf_min(void (*func)(), int iters, int counter)
+count_perf_min(voidfunc func, int iters, int counter)
 {
     return count_perf_min_below(func, iters, 0, counter);
 }
@@ -316,7 +318,7 @@ main(int argc, char **argv)
     int jump_addrs[max_jumps];
     jump_addrs[0] = last;
     buf[last] = INSN_RET;
-    void (*func)() = (void(*)())buf + jump_addrs[0];
+    voidfunc func = (voidfunc)buf + jump_addrs[0];
 
     for (int i = 1; i < max_jumps; i++) {
         int target;
