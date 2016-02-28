@@ -151,7 +151,7 @@ determine_perf_event(void)
     errx(EXIT_FAILURE, "unknown CPU model %d", model);
 }
 
-inline uint64_t
+static uint64_t
 rdpmc(uint32_t ctr)
 {
     uint32_t low, high;
@@ -159,7 +159,7 @@ rdpmc(uint32_t ctr)
     return (uint64_t)low | (((uint64_t)high) << 32);
 }
 
-inline void
+static void
 serialize(void) {
     __asm__ __volatile__("xor %%eax, %%eax\n\tcpuid" : : : "rax", "rbx", "rcx", "rdx");
 }
@@ -174,10 +174,7 @@ count_perf(void (*func)(), int counter)
     serialize(); // prevent instructions prior to here from crossing the rdpmc
     uint64_t before = rdpmc(counter);
     serialize(); // prevent instructions after the rdpmc from jumping ahead
-    // running the function 10x makes any consistent perf events
-    // occur repeatedly, helping to separate them from background noise
-    func(); func(); func(); func(); func();
-    func(); func(); func(); func(); func();
+    func();
     serialize(); // ensure all the func() work is done
     uint64_t after = rdpmc(counter);
     serialize(); // prevent any instructions jumping ahead of the rdpmc
@@ -332,7 +329,7 @@ main(int argc, char **argv)
         buf[target] = INSN_RET;
         jump_addrs[i] = target;
         last = target;
-        if (jumps == 0 && count_perf_min_below(func, runs, 12, counter) > 12) {
+        if (jumps == 0 && count_perf_min(func, runs, counter) > 0) {
             jumps = i;
             break;
         }
@@ -346,7 +343,7 @@ main(int argc, char **argv)
     long clears = count_perf_min(func, runs * 10, counter);
     printf("BACLEARS: %ld\n", clears);
 
-    if (clears < 10) {
+    if (clears == 0) {
         printf("Bailing: no event on every iteration\n");
         return 0;
     }
@@ -366,7 +363,7 @@ main(int argc, char **argv)
             write_jump(buf, jump_addrs[i - 1], jump_addrs[i + 1]);
         }
         long modified_clears = count_perf_min(func, runs, counter);
-        if (modified_clears < clears - 6) {
+        if (modified_clears != clears) {
             uintptr_t addr = (uintptr_t)buf + jump_addrs[i];
             printf("%03d %8lx %ld\n", i + 1, addr, modified_clears);
             if (mask == 0) {
