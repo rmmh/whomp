@@ -74,7 +74,7 @@ open_perf_counter(int event)
     pe.size = sizeof(struct perf_event_attr);
     pe.type = PERF_TYPE_RAW;
     pe.config = event;
-    pe.disabled = 1;
+    pe.pinned = 1;
     fd = perf_event_open(&pe, 0, -1, -1, 0);
     if (fd == -1)
         err(EXIT_FAILURE, "Error opening leader %llx", pe.config);
@@ -293,8 +293,6 @@ main(int argc, char **argv)
 
     bind_to_cpu(cpu);
     int fd = open_perf_counter(determine_perf_event());
-    ioctl(fd, PERF_EVENT_IOC_RESET, 0);
-    ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
 
     struct perf_event_mmap_page *event_buf = (struct perf_event_mmap_page*)mmap(
             NULL, getpagesize(), PROT_READ, MAP_SHARED, fd, 0);
