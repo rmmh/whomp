@@ -165,7 +165,7 @@ serialize(void) {
 }
 
 long
-count_perf(void (*func)(), int counter)
+count_perf(void (*func)(void), int counter)
 {
     // warm up
     func(); func(); func(); func(); func();
